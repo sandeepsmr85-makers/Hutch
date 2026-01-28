@@ -23,14 +23,16 @@ def main():
     os.environ['PORT'] = '5001'
     
     flask_cmd = [sys.executable, '-m', 'server_py.main']
-    flask_process = subprocess.Popen(flask_cmd, cwd=os.getcwd())
+    flask_process = subprocess.Popen(flask_cmd, cwd=os.getcwd(), shell=os.name == 'nt')
     processes.append(flask_process)
     print("Started Flask API on port 5001")
     
     time.sleep(1)
     
-    vite_cmd = ['npx', 'vite', '--host', '0.0.0.0', '--port', '5000']
-    vite_process = subprocess.Popen(vite_cmd, cwd=os.getcwd())
+    # Use npx.cmd on Windows if available, otherwise npx
+    npx_cmd = 'npx.cmd' if os.name == 'nt' else 'npx'
+    vite_cmd = [npx_cmd, 'vite', '--host', '0.0.0.0', '--port', '5000']
+    vite_process = subprocess.Popen(vite_cmd, cwd=os.getcwd(), shell=os.name == 'nt')
     processes.append(vite_process)
     print("Started Vite dev server on port 5000")
     
