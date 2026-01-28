@@ -189,6 +189,22 @@ def execute_workflow_async(execution_id, workflow_id):
             
             output_handle = 'output'
             try:
+                retries = int(config.get('retries', 0))
+                retry_delay = int(config.get('retryDelay', 5))
+                timeout = int(config.get('timeout', 3600))
+                
+                def run_with_retry(func, *args, **kwargs):
+                    last_exc = None
+                    for attempt in range(retries + 1):
+                        try:
+                            return func(*args, **kwargs)
+                        except Exception as e:
+                            last_exc = e
+                            if attempt < retries:
+                                logs.append({'timestamp': datetime.now().isoformat(), 'level': 'WARN', 'message': f"Attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s..."})
+                                time.sleep(retry_delay)
+                    raise last_exc
+
                 if node_type == 'airflow_trigger':
                     dag_id = resolve_variables(config.get('dagId', ''), execution_context)
                     conf = config.get('conf', {})
