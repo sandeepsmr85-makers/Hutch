@@ -298,13 +298,13 @@ def execute_workflow_async(execution_id, workflow_id):
                         if failed_assertions:
                             error_msg = f"Assertions failed: {', '.join(failed_assertions)}"
                             logs.append({'timestamp': datetime.now().isoformat(), 'level': 'ERROR', 'message': error_msg})
-                            results[node_id] = {'status': 'failure', 'error': error_msg}
+                            results[node_id] = {'status': 'failure', 'error': error_msg, 'logs_text': logs_text, 'dag_id': node_dag_id, 'task_name': task_name}
                             assertion_failed = True
                             break
                         else:
                             logs.append({'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': f"All {len(log_assertions)} log assertions passed for task {task_name}"})
-                            execution_context[node_id] = {'status': 'success'}
-                            results[node_id] = {'status': 'success'}
+                            execution_context[node_id] = {'status': 'success', 'logs_text': logs_text}
+                            results[node_id] = {'status': 'success', 'logs_text': logs_text, 'dag_id': node_dag_id, 'task_name': task_name}
                     else:
                         raise Exception("Airflow credential not found for log check")
                 
@@ -373,9 +373,38 @@ def execute_workflow_async(execution_id, workflow_id):
                         logs.append({'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': f"Query results exported to Excel: {excel_path}"})
                     
                     record_count = len(query_results)
+                    
+                    # Process Python assertion if provided
+                    python_assertion = config.get('pythonAssertion', '').strip()
+                    assertion_passed = True
+                    assertion_error = None
+                    
+                    if python_assertion:
+                        try:
+                            # Create a safe local scope for assertion evaluation
+                            local_scope = {'results': query_results, 'count': record_count}
+                            assertion_result = eval(python_assertion, {"__builtins__": {'any': any, 'all': all, 'len': len, 'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round, 'True': True, 'False': False}}, local_scope)
+                            
+                            if not assertion_result:
+                                assertion_passed = False
+                                assertion_error = f"Assertion failed: '{python_assertion}' evaluated to False"
+                                logs.append({'timestamp': datetime.now().isoformat(), 'level': 'ERROR', 'message': assertion_error})
+                            else:
+                                logs.append({'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': f"Assertion passed: '{python_assertion}'"})
+                        except Exception as e:
+                            assertion_passed = False
+                            assertion_error = f"Assertion error: {str(e)}"
+                            logs.append({'timestamp': datetime.now().isoformat(), 'level': 'ERROR', 'message': assertion_error})
+                    
                     execution_context['queryResult'] = {'record_count': record_count}
-                    execution_context[node_id] = {'count': record_count, 'excel_path': excel_path, 'results': query_results}
-                    results[node_id] = {'status': 'success', 'count': record_count, 'excel_path': excel_path}
+                    execution_context[node_id] = {'count': record_count, 'excel_path': excel_path, 'results': query_results, 'assertion_passed': assertion_passed}
+                    
+                    if assertion_passed:
+                        results[node_id] = {'status': 'success', 'count': record_count, 'excel_path': excel_path}
+                    else:
+                        results[node_id] = {'status': 'failure', 'count': record_count, 'excel_path': excel_path, 'error': assertion_error}
+                        assertion_failed = True
+                        break
                 
                 elif node_type == 'api_request':
                     url = resolve_variables(config.get('url', ''), execution_context)
@@ -641,6 +670,113 @@ def register_workflow_routes(app):
         if not workflow: return jsonify({'message': 'Workflow not found'}), 404
         python_code = generate_python_code(workflow)
         return jsonify({'code': python_code})
+
+    @app.get('/api/executions/<int:execution_id>/excel/<node_id>')
+    def download_excel(execution_id, node_id):
+        from flask import send_file
+        import os
+        
+        file_path = f"/tmp/query_result_{execution_id}_{node_id}.xlsx"
+        if os.path.exists(file_path):
+            return send_file(
+                file_path,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=f'query_result_{execution_id}_{node_id}.xlsx'
+            )
+        return jsonify({'message': 'Excel file not found'}), 404
+
+    @app.get('/api/executions/<int:execution_id>/zip')
+    def download_execution_zip(execution_id):
+        from flask import send_file
+        import os
+        import zipfile
+        import io
+        
+        include_logs = request.args.get('include_logs', 'true').lower() == 'true'
+        
+        execution = storage.get_execution(execution_id)
+        if not execution:
+            return jsonify({'message': 'Execution not found'}), 404
+        
+        workflow = storage.get_workflow(execution.get('workflowId'))
+        workflow_name = workflow.get('name', 'workflow') if workflow else 'workflow'
+        safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in workflow_name).strip()
+        
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            results = execution.get('results', {})
+            if isinstance(results, str):
+                results = json.loads(results)
+            
+            # Add Excel files for SQL query nodes
+            for node_id, result in results.items():
+                if isinstance(result, dict) and result.get('excel_path'):
+                    excel_path = f"/tmp/query_result_{execution_id}_{node_id}.xlsx"
+                    if os.path.exists(excel_path):
+                        # Get node label for filename
+                        node_label = node_id
+                        if workflow:
+                            for node in workflow.get('nodes', []):
+                                if node.get('id') == node_id:
+                                    node_label = node.get('data', {}).get('label', node_id)
+                                    break
+                        safe_label = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in str(node_label)).strip()
+                        zipf.write(excel_path, f"excel/{safe_label}_{node_id}.xlsx")
+            
+            # Add execution logs
+            if include_logs:
+                logs = execution.get('logs', [])
+                if isinstance(logs, str):
+                    logs = json.loads(logs)
+                
+                log_content = []
+                for log_entry in logs:
+                    if isinstance(log_entry, dict):
+                        timestamp = log_entry.get('timestamp', '')
+                        level = log_entry.get('level', 'INFO')
+                        message = log_entry.get('message', '')
+                        log_content.append(f"[{timestamp}] [{level}] {message}")
+                    else:
+                        log_content.append(str(log_entry))
+                
+                if log_content:
+                    zipf.writestr("logs/execution_log.txt", "\n".join(log_content))
+                
+                # Add DAG-specific logs from results
+                for node_id, result in results.items():
+                    if isinstance(result, dict):
+                        # Check if this is an airflow log check node with captured logs
+                        if result.get('logs_text'):
+                            node_label = node_id
+                            if workflow:
+                                for node in workflow.get('nodes', []):
+                                    if node.get('id') == node_id:
+                                        node_label = node.get('data', {}).get('label', node_id)
+                                        break
+                            safe_label = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in str(node_label)).strip()
+                            zipf.writestr(f"logs/dag_{safe_label}_{node_id}.txt", result.get('logs_text', ''))
+            
+            # Add execution summary
+            summary = {
+                'execution_id': execution_id,
+                'workflow_name': workflow_name,
+                'status': execution.get('status'),
+                'started_at': execution.get('startedAt'),
+                'completed_at': execution.get('completedAt'),
+                'results_summary': {k: {'status': v.get('status'), 'count': v.get('count')} for k, v in results.items() if isinstance(v, dict)}
+            }
+            zipf.writestr("execution_summary.json", json.dumps(summary, indent=2, default=str))
+        
+        zip_buffer.seek(0)
+        
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'execution_{execution_id}_{safe_name}.zip'
+        )
 
     @app.get('/api/workflows')
     def list_workflows():

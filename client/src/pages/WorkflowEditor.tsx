@@ -657,6 +657,25 @@ export default function WorkflowEditor() {
               {selectedNode?.data.type === 'sql_query' && (
                 <div className="space-y-4">
                   <div className="space-y-2">
+                    <label className="text-sm font-medium">Database Credential</label>
+                    <Select 
+                      value={selectedNode?.data.config?.credentialId?.toString() || ""}
+                      onValueChange={(val) => updateNodeData(selectedNode!.id, { 
+                        config: { ...selectedNode.data.config, credentialId: val ? parseInt(val) : undefined } 
+                      })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Database Credential (or use internal)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Internal Database</SelectItem>
+                        {credentials?.filter(c => c.type === 'mssql' || c.type === 'postgres').map(c => (
+                          <SelectItem key={c.id} value={c.id.toString()}>{c.name} ({c.type})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-sm font-medium">SQL Query</label>
                     <textarea 
                       className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -669,14 +688,14 @@ export default function WorkflowEditor() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Python Assertion (Optional)</label>
                     <textarea 
-                      placeholder="e.g. any(r['value'] > 100 for r in results)"
+                      placeholder="e.g. len(results) > 0 or any(r['value'] > 100 for r in results)"
                       className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm"
                       value={selectedNode?.data.config?.pythonAssertion || ''} 
                       onChange={(e) => updateNodeData(selectedNode!.id, { 
                         config: { ...selectedNode.data.config, pythonAssertion: e.target.value } 
                       })}
                     />
-                    <p className="text-[10px] text-muted-foreground italic">Use 'results' to access the row list.</p>
+                    <p className="text-[10px] text-muted-foreground italic">Use 'results' to access the row list, 'count' for record count. Assertion fails if expression evaluates to False.</p>
                   </div>
                 </div>
               )}
@@ -874,6 +893,50 @@ export default function WorkflowEditor() {
                     value={logSearchQuery}
                     onChange={e => setLogSearchQuery(e.target.value)}
                   />
+                </div>
+                
+                {/* Excel download buttons for SQL query nodes */}
+                {execution.results && Object.entries(execution.results as Record<string, any>).filter(([_, result]) => result.excel_path).length > 0 && (
+                  <div className="flex items-center gap-2 ml-4">
+                    <span className="text-[10px] text-muted-foreground">Excel:</span>
+                    {Object.entries(execution.results as Record<string, any>)
+                      .filter(([_, result]) => result.excel_path)
+                      .map(([nodeId, result]) => (
+                        <Button
+                          key={nodeId}
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] gap-1 px-2"
+                          onClick={() => window.location.href = `/api/executions/${execution.id}/excel/${nodeId}`}
+                        >
+                          <Download className="w-3 h-3" />
+                          {nodes.find(n => n.id === nodeId)?.data?.label || nodeId}
+                        </Button>
+                      ))
+                    }
+                  </div>
+                )}
+                
+                {/* Zip download with logs toggle */}
+                <div className="flex items-center gap-2 ml-4 border-l border-border pl-4">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px] gap-1 px-2"
+                    onClick={() => window.location.href = `/api/executions/${execution.id}/zip?include_logs=true`}
+                  >
+                    <Download className="w-3 h-3" />
+                    Zip (with logs)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-[10px] gap-1 px-2"
+                    onClick={() => window.location.href = `/api/executions/${execution.id}/zip?include_logs=false`}
+                  >
+                    <Download className="w-3 h-3" />
+                    Zip (no logs)
+                  </Button>
                 </div>
               </div>
               <button 
