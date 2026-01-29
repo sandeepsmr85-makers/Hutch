@@ -1,6 +1,6 @@
 import os
 import time
-from flask import Flask, send_from_directory, request
+from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from .models import init_db
 from .utils import log
