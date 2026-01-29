@@ -61,6 +61,16 @@ This starts:
 - SQL queries can use different database credentials (MSSQL, PostgreSQL)
 - Or use the internal database if no credential is selected
 
+### MCP Tools (Model Context Protocol)
+- Lightweight MCP server in `server_py/mcp_server.py`
+- Design principle: MCP tools only TRIGGER or DECIDE - they do NOT process heavy data
+- **Airflow tools**: list_dags, trigger_dag, get_dag_run_status, pause/unpause_dag, clear_dag_run, health_check
+- **S3 tools**: list_objects, check_object_exists, delete_object, get_object_metadata, copy_object, list_buckets, generate_presigned_url
+- **SFTP tools**: list_directory, check_file_exists, delete_file, get_file_info, rename_file, create_directory, remove_directory, test_connection
+- **SQL tools**: execute_query (limited rows), test_connection, get_tables, get_table_columns, count_rows, table_exists, get_primary_keys, get_indexes, get_database_info
+- Run MCP server: `python -m server_py.mcp_server`
+
 ## Recent Changes
+- 2026-01-29: Added MCP tools for Airflow, S3, SFTP, SQL (lightweight trigger/decide pattern)
 - 2026-01-28: Added SQL query assertion support, database credential selector, and Excel download capability
 - 2026-01-27: Completed migration to Replit environment, installed npm and Python dependencies

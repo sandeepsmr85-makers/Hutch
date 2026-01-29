@@ -10,3 +10,18 @@
 [x] Added database credential selector for SQL queries in UI
 [x] Added Excel download endpoint (/api/executions/{id}/excel/{nodeId})
 [x] Added Excel download buttons in execution logs panel
+
+## Migration Complete
+[x] Installed Python packages (flask, flask-cors, sqlalchemy, requests)
+[x] Installed npm packages
+[x] Verified workflow is running - Flask API on 5001, Vite on 5000
+
+## MCP Tools Implementation
+[x] Installed fastmcp Python SDK
+[x] Created server_py/mcp_server.py with lightweight MCP tools
+[x] Added Airflow tools: list_dags, trigger_dag, get_dag_run_status, pause/unpause_dag, clear_dag_run, health_check
+[x] Added S3 tools: list_objects, check_object_exists, delete_object, get_object_metadata, copy_object, list_buckets, generate_presigned_url
+[x] Added SFTP tools: list_directory, check_file_exists, delete_file, get_file_info, rename_file, create_directory, remove_directory, test_connection
+[x] Added SQL tools: execute_query (limited rows), test_connection, get_tables, get_table_columns, count_rows, table_exists, get_primary_keys, get_indexes, get_database_info
+[x] Added list_credentials helper tool
+[x] Verified workflow running after MCP implementation
