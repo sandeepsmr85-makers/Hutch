@@ -5,11 +5,8 @@ import base64
 import requests
 import re
 import threading
-import pandas as pd
 import sqlalchemy
 from sqlalchemy import text
-from openpyxl.styles import PatternFill, Font
-from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta
 from flask import request, jsonify
 from .storage import storage
@@ -18,30 +15,48 @@ from .utils import log, resolve_variables, get_ai
 def export_to_excel(data, node_id, execution_id):
     """Export query result to Excel with auto-fit columns and highlighted headers."""
     try:
-        if not data or not isinstance(data, list):
+        from openpyxl import Workbook
+        from openpyxl.styles import PatternFill, Font
+        from openpyxl.utils import get_column_letter
+        
+        if not data or not isinstance(data, list) or len(data) == 0:
             return None
             
-        df = pd.DataFrame(data)
         file_path = f"/tmp/query_result_{execution_id}_{node_id}.xlsx"
         
-        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Query Results')
-            workbook = writer.book
-            worksheet = writer.sheets['Query Results']
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Query Results"
+        
+        # Get headers from the first row
+        headers = list(data[0].keys())
+        ws.append(headers)
+        
+        # Style headers
+        yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+        header_font = Font(bold=True)
+        for cell in ws[1]:
+            cell.fill = yellow_fill
+            cell.font = header_font
             
-            # Highlight headers in yellow
-            yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
-            header_font = Font(bold=True)
+        # Append data rows
+        for row_dict in data:
+            ws.append([row_dict.get(h) for h in headers])
             
-            for cell in worksheet[1]:
-                cell.fill = yellow_fill
-                cell.font = header_font
+        # Auto-fit column width
+        for i, column_cells in enumerate(ws.columns):
+            max_length = 0
+            column = get_column_letter(i + 1)
+            for cell in column_cells:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = (max_length + 2)
+            ws.column_dimensions[column].width = adjusted_width
             
-            # Auto-fit column width
-            for i, col in enumerate(df.columns):
-                column_len = max(df[col].astype(str).str.len().max(), len(col)) + 2
-                worksheet.column_dimensions[get_column_letter(i + 1)].width = column_len
-                
+        wb.save(file_path)
         return file_path
     except Exception as e:
         log(f"Excel export failed: {e}")
@@ -438,7 +453,7 @@ def execute_workflow_async(execution_id, workflow_id):
                     script_code = config.get('code', '')
                     logs.append({'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': "Executing Python script..."})
                     
-                    local_scope = {'context': execution_context, 'result': None, 'requests': requests, 'json': json, 'pd': pd}
+                    local_scope = {'context': execution_context, 'result': None, 'requests': requests, 'json': json}
                     exec(script_code, {}, local_scope)
                     
                     script_result = local_scope.get('result')
@@ -552,40 +567,101 @@ def generate_python_code(workflow):
         "import boto3",
         "import paramiko",
         "import io",
-        "from datetime import datetime",
+        "import sqlalchemy",
+        "from sqlalchemy import text",
+        "from datetime import datetime, timedelta",
         "",
+        "# Configuration and Helpers",
         "execution_context = {}",
         "",
         "def resolve_variables(text, context):",
         "    if not isinstance(text, str): return text",
+        "    # Handle built-in date variables",
+        "    today = datetime.now()",
+        "    yesterday = today - timedelta(days=1)",
+        "    text = text.replace('{{today}}', today.strftime('%Y-%m-%d'))",
+        "    text = text.replace('{{yesterday}}', yesterday.strftime('%Y-%m-%d'))",
+        "    ",
         "    for key, value in context.items():",
+        "        # Handle node specific results",
+        "        if isinstance(value, dict):",
+        "            for k, v in value.items():",
+        "                text = text.replace('{{' + key + '.' + k + '}}', str(v))",
         "        text = text.replace('{{' + key + '}}', str(value))",
         "    return text",
-        ""
+        "",
+        "def run_workflow():",
+        "    print(f\"Starting workflow execution: {datetime.now()}\")"
     ]
     
-    # Simple topological sort for sequence
-    # This is a basic implementation; for complex graphs, a real topo sort is needed
-    for node in nodes:
+    # Simple dependency mapping
+    def get_incoming_edges(node_id):
+        return [e for e in edges if e.get('target') == node_id]
+
+    # Topological-ish sort: find nodes with no incoming edges first
+    visited = set()
+    queue = [n for n in nodes if not get_incoming_edges(n.get('id'))]
+    
+    while queue:
+        node = queue.pop(0)
         node_id = node.get('id')
+        if node_id in visited: continue
+        visited.add(node_id)
+        
         node_data = node.get('data', {})
         node_type = node_data.get('type')
         config = node_data.get('config', {})
+        label = node_data.get('label', node_id)
         
-        code.append(f"# Node: {node_data.get('label')} ({node_type})")
+        code.append(f"\n    # --- Node: {label} ({node_type}) ---")
         
         if node_type == 'airflow_trigger':
-            code.append(f"print('Triggering DAG: {config.get('dagId')}')")
-            # Code to trigger DAG would go here using requests
+            dag_id = config.get('dagId', '')
+            code.append(f"    dag_id = resolve_variables('{dag_id}', execution_context)")
+            code.append(f"    print(f\"Triggering Airflow DAG: {{dag_id}}\")")
+            code.append("    # Note: Ensure base_url and auth are configured correctly")
+            code.append("    # response = requests.post(f\"{base_url}/api/v1/dags/{dag_id}/dagRuns\", json={'conf': {}}, headers=auth_headers)")
+            code.append(f"    execution_context['{node_id}'] = {{'status': 'success', 'dagRunId': 'run_' + str(int(time.time()))}}")
+            
         elif node_type == 'sql_query':
-            code.append(f"print('Running SQL: {config.get('query')}')")
-        elif node_type == 's3_operation':
-            code.append(f"print('S3 Operation: {config.get('operation')} on {config.get('bucket')}')")
-        elif node_type == 'sftp_operation':
-            code.append(f"print('SFTP Operation: {config.get('operation')} on {config.get('host')}')")
-        
-        code.append("")
-        
+            query = config.get('query', '').replace('\n', ' ')
+            code.append(f"    query = resolve_variables(\"\"\"{query}\"\"\", execution_context)")
+            code.append(f"    print(f\"Executing SQL Query: {{query[:50]}}...\")")
+            code.append("    # engine = sqlalchemy.create_engine(conn_str)")
+            code.append("    # with engine.connect() as conn: result = conn.execute(text(query)); query_results = [dict(row._mapping) for row in result]")
+            code.append(f"    execution_context['{node_id}'] = {{'status': 'success', 'count': 0, 'results': []}}")
+            
+        elif node_type == 'python_script':
+            script = config.get('code', '').replace('\n', '\n        ')
+            code.append(f"    print(\"Executing Python Script...\")")
+            code.append(f"    # User Script:")
+            code.append(f"    # {script}")
+            code.append(f"    execution_context['{node_id}'] = {{'status': 'success', 'result': None}}")
+            
+        elif node_type == 'api_request':
+            url = config.get('url', '')
+            method = config.get('method', 'GET')
+            code.append(f"    url = resolve_variables('{url}', execution_context)")
+            code.append(f"    print(f\"Sending {method} request to {{url}}\")")
+            code.append(f"    # response = requests.request('{method}', url, json={config.get('body', {})})")
+            code.append(f"    execution_context['{node_id}'] = {{'status': 'success', 'data': {{}}}}")
+
+        elif node_type == 'condition':
+            variable = config.get('variable', '')
+            operator = config.get('operator', '==')
+            value = config.get('value', '')
+            code.append(f"    val = resolve_variables('{{{{{variable}}}}}', execution_context)")
+            code.append(f"    condition_met = str(val) {operator} '{value}'")
+            code.append(f"    print(f\"Condition check: {{condition_met}}\")")
+            code.append(f"    execution_context['{node_id}'] = {{'status': 'success', 'result': condition_met}}")
+            
+        # Add next nodes to queue
+        next_nodes = [n for edge in edges if edge.get('source') == node_id for n in nodes if n.get('id') == edge.get('target')]
+        queue.extend(next_nodes)
+
+    code.append("\nif __name__ == '__main__':")
+    code.append("    run_workflow()")
+    
     return "\n".join(code)
 
 def generate_pytest_suite(workflow_ids):
@@ -655,7 +731,12 @@ def register_workflow_routes(app):
 
     @app.post('/api/git/sync')
     def git_sync():
-        import git
+        try:
+            import git
+        except ImportError:
+            log("GitPython not installed")
+            return jsonify({'status': 'error', 'message': 'GitPython not installed'}), 500
+        
         data = request.get_json()
         action = data.get('action') # 'push' or 'pull'
         repo_path = os.getcwd()
