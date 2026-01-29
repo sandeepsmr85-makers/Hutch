@@ -5,7 +5,7 @@ integrations = ["javascript_openai_ai_integrations:2.0.0", "python_openai_ai_int
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales", "lsof", "openssl", "postgresql"]
+packages = ["glibcLocales", "openssl", "postgresql"]
 
 [workflows]
 runButton = "Project"
