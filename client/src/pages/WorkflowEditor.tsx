@@ -246,6 +246,44 @@ export default function WorkflowEditor() {
   const { mutateAsync: executeWorkflow, isPending: isStarting } = useExecuteWorkflow();
 
   const airflowCredentials = credentials?.filter(c => c.type === 'airflow') || [];
+  const sqlCredentials = credentials?.filter(c => c.type === 'mssql') || [];
+  const s3Credentials = credentials?.filter(c => c.type === 's3') || [];
+  const sftpCredentials = credentials?.filter(c => c.type === 'sftp') || [];
+
+  // Default credential logic
+  useEffect(() => {
+    if (!credentials || !nodes.length) return;
+    
+    setNodes(nds => nds.map(node => {
+      const nodeType = node.data.type;
+      const config = node.data.config || {};
+      
+      // If credential already set, skip
+      if (config.credentialId) return node;
+
+      let defaultCred = null;
+      if (nodeType === 'airflow_trigger' || nodeType === 'airflow_log_check') {
+        if (airflowCredentials.length === 1) defaultCred = airflowCredentials[0];
+      } else if (nodeType === 'sql_query') {
+        if (sqlCredentials.length === 1) defaultCred = sqlCredentials[0];
+      } else if (nodeType === 's3_operation') {
+        if (s3Credentials.length === 1) defaultCred = s3Credentials[0];
+      } else if (nodeType === 'sftp_operation') {
+        if (sftpCredentials.length === 1) defaultCred = sftpCredentials[0];
+      }
+
+      if (defaultCred) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            config: { ...config, credentialId: defaultCred.id }
+          }
+        };
+      }
+      return node;
+    }));
+  }, [credentials, nodes.length, setNodes]);
 
   const handleExport = async () => {
     try {
@@ -747,7 +785,7 @@ export default function WorkflowEditor() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="internal">Internal Database</SelectItem>
-                        {credentials?.filter(c => c.type === 'mssql' || c.type === 'postgres').map(c => (
+                        {sqlCredentials.map(c => (
                           <SelectItem key={c.id} value={c.id.toString()}>{c.name} ({c.type})</SelectItem>
                         ))}
                       </SelectContent>
@@ -774,6 +812,70 @@ export default function WorkflowEditor() {
                       })}
                     />
                     <p className="text-[10px] text-muted-foreground italic">Use 'results' to access the row list, 'count' for record count. Assertion fails if expression evaluates to False.</p>
+                  </div>
+                </div>
+              )}
+
+              {selectedNode?.data.type === 's3_operation' && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">S3 Credential</label>
+                    <Select 
+                      value={selectedNode?.data.config?.credentialId?.toString() || ""}
+                      onValueChange={(val) => updateNodeData(selectedNode!.id, { 
+                        config: { ...selectedNode.data.config, credentialId: parseInt(val) } 
+                      })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select S3 Credential" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {s3Credentials.map(c => (
+                          <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Bucket</label>
+                    <Input 
+                      value={selectedNode?.data.config?.bucket || ''} 
+                      onChange={(e) => updateNodeData(selectedNode!.id, { 
+                        config: { ...selectedNode.data.config, bucket: e.target.value } 
+                      })}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {selectedNode?.data.type === 'sftp_operation' && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">SFTP Credential</label>
+                    <Select 
+                      value={selectedNode?.data.config?.credentialId?.toString() || ""}
+                      onValueChange={(val) => updateNodeData(selectedNode!.id, { 
+                        config: { ...selectedNode.data.config, credentialId: parseInt(val) } 
+                      })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select SFTP Credential" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sftpCredentials.map(c => (
+                          <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Remote Path</label>
+                    <Input 
+                      value={selectedNode?.data.config?.remotePath || ''} 
+                      onChange={(e) => updateNodeData(selectedNode!.id, { 
+                        config: { ...selectedNode.data.config, remotePath: e.target.value } 
+                      })}
+                    />
                   </div>
                 </div>
               )}

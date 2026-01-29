@@ -1,11 +1,11 @@
-modules = ["nodejs-20", "python-3.12", "web"]
+modules = ["nodejs-20", "web", "python-3.12"]
 [agent]
 expertMode = true
 integrations = ["javascript_openai_ai_integrations:2.0.0", "python_openai_ai_integrations:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales", "openssl", "postgresql"]
+packages = ["glibcLocales", "lsof", "openssl", "postgresql"]
 
 [workflows]
 runButton = "Project"
