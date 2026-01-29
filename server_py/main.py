@@ -29,6 +29,10 @@ register_workflow_routes(app)
 register_airflow_routes(app)
 register_management_routes(app)
 
+@app.route('/api/health')
+def health_check():
+    return jsonify({"status": "healthy", "time": time.time()})
+
 @app.route('/')
 @app.route('/<path:path>')
 def serve_frontend(path=''):

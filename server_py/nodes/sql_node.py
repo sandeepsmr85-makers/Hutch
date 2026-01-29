@@ -25,12 +25,6 @@ class SQLQueryNode(BaseNode):
                         with engine.connect() as conn:
                             result = conn.execute(text(query))
                             query_results = [dict(row._mapping) for row in result]
-                    elif cred_type == 'postgres':
-                        conn_str = f"postgresql://{cred_data.get('username')}:{cred_data.get('password')}@{cred_data.get('host')}:{cred_data.get('port', 5432)}/{cred_data.get('database')}"
-                        engine = sqlalchemy.create_engine(conn_str)
-                        with engine.connect() as conn:
-                            result = conn.execute(text(query))
-                            query_results = [dict(row._mapping) for row in result]
             else:
                 from ..models import engine as internal_engine
                 with internal_engine.connect() as conn:
