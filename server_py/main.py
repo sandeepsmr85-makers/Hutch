@@ -1,12 +1,13 @@
 import os
 import time
-from flask import Flask, send_from_directory, request, jsonify
+from flask import Flask, send_from_directory, request, jsonify, send_file
 from flask_cors import CORS
 from .models import init_db
 from .utils import log
 from .workflows import register_workflow_routes
 from .airflow_routes import register_airflow_routes
 from .management import register_management_routes
+from .mcp.tools import register_mcp_routes
 
 app = Flask(__name__, static_folder='../client/dist', static_url_path='')
 CORS(app)
@@ -28,6 +29,7 @@ def log_response(response):
 register_workflow_routes(app)
 register_airflow_routes(app)
 register_management_routes(app)
+register_mcp_routes(app)
 
 @app.route('/api/health')
 def health_check():

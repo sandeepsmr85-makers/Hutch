@@ -1,0 +1,50 @@
+Airflow (16 Tools)
+	•	airflow_health: Check Airflow instance health.
+	•	list_dags: List all DAGs (limit supported).
+	•	get_dag_details: Get detailed information about a specific DAG.
+	•	trigger_dag_run: Trigger a new DAG run with optional configuration.
+	•	get_dag_run_status: Get status of a specific DAG run.
+	•	list_dag_runs: List runs for a specific DAG.
+	•	get_task_instances: List task instances for a DAG run.
+	•	get_task_instance_logs: Retrieve logs for a specific task instance.
+	•	update_dag_status: Pause or unpause a DAG.
+	•	set_task_state: Manually set a task status (failed, success, etc.).
+	•	clear_task_instances: Clear tasks to trigger retries (supports upstream/downstream).
+	•	list_connections: List all Airflow connections.
+	•	get_connection: Get details of a specific connection.
+	•	list_xcom_entries: Inspect XCom data for a task.
+	•	delete_dag: Remove a DAG from the system.
+	•	clear_dag_run: Clear an entire DAG run.
+2. S3 Bucket (10 Tools)
+	•	s3_list_buckets: List all S3 buckets.
+	•	s3_list_objects: List objects with prefix and limit support.
+	•	s3_get_object_metadata: Retrieve file metadata (size, type, modification).
+	•	s3_generate_presigned_url: Create secure temporary download links.
+	•	s3_delete_object: Delete an object from storage.
+	•	s3_copy_object: Copy/move objects between buckets.
+	•	s3_check_object_exists: Verify if an object exists.
+	•	s3_get_bucket_location: Identify the bucket's geographic region.
+	•	s3_list_versions: List all versions of an object.
+	•	s3_get_bucket_versioning: Check if versioning is enabled on a bucket.
+3. SFTP (8 Tools)
+	•	sftp_list_dir: Detailed directory listing with attributes.
+	•	sftp_mkdir: Create a remote directory.
+	•	sftp_rmdir: Remove a remote directory.
+	•	sftp_stat: Get file metadata (size, permissions).
+	•	sftp_rename: Rename or move files on the server.
+	•	sftp_remove: Delete remote files.
+	•	sftp_chmod: Change file permissions.
+	•	sftp_chown: Change file ownership (UID/GID).
+4. SQL / MSSQL (8 Tools)
+	•	sql_get_schema: List all database tables.
+	•	sql_get_table_info: Get columns, indexes, and primary keys.
+	•	sql_get_indexes: Detailed index inspection.
+	•	sql_count_rows: Get the total row count for a table.
+	•	sql_query_limited: Execute read-only queries (100-row safety limit).
+	•	sql_get_foreign_keys: Map database relationships.
+	•	sql_get_database_info: Get server version and dialect.
+	•	test_connection: (Inherent in schema/info tools) Verify database access.
+
+
+
+Show we add few more operations or features ?

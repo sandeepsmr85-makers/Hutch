@@ -29,22 +29,35 @@ This starts:
 - Vite dev server on port 5000 (frontend)
 - Flask API on port 5001 (backend)
 
+### MCP Tools
+- The application exposes a set of MCP-compatible API tools at `/api/mcp/tools`.
+- These tools allow LLMs to directly execute SQL queries, S3 operations, SFTP transfers, and Airflow checks using registered credentials.
+- Available tools: `sql_query`, `s3_operation`, `sftp_operation`, `airflow_check`.
+
 ## Database
 - PostgreSQL database is configured via `DATABASE_URL` environment variable
 - Models are defined in `models.py`
 
 ## Features
 ### SQL Query Assertions
-- SQL query nodes support Python assertions to validate query results
+- SQL query nodes support Python assertions to validate query results.
+- Assertions have access to:
+  - `results`: Current node's query results (list of dicts).
+  - `count`: Number of records in `results`.
+  - `context` / `ctx` / `prev`: Full execution context containing results from all previous nodes.
+  - Previous node results are also available directly by their node ID if the ID is a valid Python identifier (e.g., `node_1['count'] > 0`).
+  - Built-ins: `any`, `all`, `len`, `sum`, `min`, `max`, `abs`, `round`, `int`, `str`, `float`, `list`, `dict`, `bool`, `type`, `isinstance`.
+  - Modules: `datetime`, `json`, `re`.
 - Use `results` variable to access the query result rows (list of dicts)
 - Use `count` variable for record count
 - Example: `len(results) > 0` or `any(r['value'] > 100 for r in results)`
 - Available functions: `any`, `all`, `len`, `sum`, `min`, `max`, `abs`, `round`
 
 ### Excel Export
-- Query results are automatically exported to Excel with:
+- Query results are automatically exported to Excel (.xlsx) with:
+  - Yellow background for headers
+  - Bold font for headers
   - Auto-fit column widths
-  - Yellow header row with bold font
 - Download Excel files from the execution logs panel
 
 ### Zip Export

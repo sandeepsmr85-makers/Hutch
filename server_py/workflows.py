@@ -13,53 +13,61 @@ from .storage import storage
 from .utils import log, resolve_variables, get_ai
 
 def export_to_excel(data, node_id, execution_id):
-    """Export query result to Excel with auto-fit columns and highlighted headers."""
+    """Export query result to an HTML-based Excel file with column auto-fitting and yellow headers."""
     try:
-        from openpyxl import Workbook
-        from openpyxl.styles import PatternFill, Font
-        from openpyxl.utils import get_column_letter
-        
         if not data or not isinstance(data, list) or len(data) == 0:
             return None
             
         file_path = f"/tmp/query_result_{execution_id}_{node_id}.xlsx"
-        
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Query Results"
-        
-        # Get headers from the first row
         headers = list(data[0].keys())
-        ws.append(headers)
         
-        # Style headers
-        yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
-        header_font = Font(bold=True)
-        for cell in ws[1]:
-            cell.fill = yellow_fill
-            cell.font = header_font
+        # Calculate approximate column widths based on headers and data
+        col_widths = {h: len(str(h)) for h in headers}
+        for row in data:
+            for h in headers:
+                val_len = len(str(row.get(h, '')))
+                if val_len > col_widths[h]:
+                    col_widths[h] = val_len
+
+        # Generate HTML table with basic Excel-compatible styling
+        html = [
+            '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">',
+            '<head><meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">',
+            '<style>',
+            'table { border-collapse: collapse; }',
+            'th { background-color: #FFFF00; border: 0.5pt solid black; font-weight: bold; }',
+            'td { border: 0.5pt solid black; white-space: nowrap; }',
+            '</style>',
+            '</head><body><table>'
+        ]
+        
+        # Set column widths using <col> tags
+        for h in headers:
+            width = (col_widths[h] + 2) * 7
+            html.append(f'<col width="{width}">')
             
-        # Append data rows
-        for row_dict in data:
-            ws.append([row_dict.get(h) for h in headers])
+        # Write headers
+        html.append('<tr>')
+        for h in headers:
+            html.append(f'<th>{h}</th>')
+        html.append('</tr>')
+        
+        # Write data
+        for row in data:
+            html.append('<tr>')
+            for h in headers:
+                val = str(row.get(h, ''))
+                html.append(f'<td>{val}</td>')
+            html.append('</tr>')
             
-        # Auto-fit column width
-        for i, column_cells in enumerate(ws.columns):
-            max_length = 0
-            column = get_column_letter(i + 1)
-            for cell in column_cells:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = (max_length + 2)
-            ws.column_dimensions[column].width = adjusted_width
+        html.append('</table></body></html>')
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(html))
             
-        wb.save(file_path)
         return file_path
     except Exception as e:
-        log(f"Excel export failed: {e}")
+        log(f"Export failed: {e}")
         return None
 
 def get_dag_state(dag_id, base_url, auth_headers):
@@ -407,8 +415,29 @@ def execute_workflow_async(execution_id, workflow_id):
                     if python_assertion:
                         try:
                             # Create a safe local scope for assertion evaluation
-                            local_scope = {'results': query_results, 'count': record_count}
-                            assertion_result = eval(python_assertion, {"__builtins__": {'any': any, 'all': all, 'len': len, 'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round, 'True': True, 'False': False}}, local_scope)
+                            local_scope = {
+                                'results': query_results, 
+                                'count': record_count,
+                                'context': execution_context,
+                                'ctx': execution_context,
+                                'prev': execution_context,
+                                'datetime': datetime,
+                                'json': json,
+                                're': re
+                            }
+                            # Include previous node results as direct variables if they are valid identifiers
+                            for k, v in execution_context.items():
+                                if k and isinstance(k, str) and k.isidentifier():
+                                    local_scope[k] = v
+
+                            assertion_result = eval(python_assertion, {
+                                "__builtins__": {
+                                    'any': any, 'all': all, 'len': len, 'sum': sum, 'min': min, 'max': max, 
+                                    'abs': abs, 'round': round, 'True': True, 'False': False, 'int': int, 
+                                    'str': str, 'float': float, 'list': list, 'dict': dict, 'bool': bool,
+                                    'type': type, 'isinstance': isinstance
+                                }
+                            }, local_scope)
                             
                             if not assertion_result:
                                 assertion_passed = False
@@ -804,7 +833,7 @@ def register_workflow_routes(app):
             # Add Excel files for SQL query nodes
             for node_id, result in results.items():
                 if isinstance(result, dict) and result.get('excel_path'):
-                    excel_path = f"/tmp/query_result_{execution_id}_{node_id}.xlsx"
+                    excel_path = f"/tmp/query_result_{execution_id}_{node_id}.xls"
                     if os.path.exists(excel_path):
                         # Get node label for filename
                         node_label = node_id
@@ -814,7 +843,7 @@ def register_workflow_routes(app):
                                     node_label = node.get('data', {}).get('label', node_id)
                                     break
                         safe_label = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in str(node_label)).strip()
-                        zipf.write(excel_path, f"excel/{safe_label}_{node_id}.xlsx")
+                        zipf.write(excel_path, f"excel/{safe_label}_{node_id}.xls")
             
             # Add execution logs
             if include_logs:
