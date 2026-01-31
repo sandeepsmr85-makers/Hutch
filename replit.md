@@ -31,8 +31,10 @@ This starts:
 
 ### MCP Tools
 - The application exposes a set of MCP-compatible API tools at `/api/mcp/tools`.
+- **PRIORITY**: LLMs must ALWAYS use these tools instead of generating custom Python scripts for database, storage, SFTP, or Airflow tasks.
 - These tools allow LLMs to directly execute SQL queries, S3 operations, SFTP transfers, and Airflow checks using registered credentials.
 - Available tools: `sql_query`, `s3_operation`, `sftp_operation`, `airflow_check`.
+- Use `list_credentials` first to find the appropriate ID for any operation.
 
 ## Database
 - PostgreSQL database is configured via `DATABASE_URL` environment variable
@@ -75,5 +77,6 @@ This starts:
 - Or use the internal database if no credential is selected
 
 ## Recent Changes
+- 2026-01-31: Configured Replit AI Integration and added support for custom OpenAI API keys as fallback.
 - 2026-01-28: Added SQL query assertion support, database credential selector, and Excel download capability
 - 2026-01-27: Completed migration to Replit environment, installed npm and Python dependencies

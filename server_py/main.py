@@ -44,6 +44,48 @@ def serve_frontend(path=''):
         return send_from_directory(app.static_folder or '', 'index.html')
     return "Frontend build not found. Please run 'npm run build' or check client/dist directory.", 404
 
+from .storage import storage
+
+@app.route('/api/workflows/<int:id>/generate-test', methods=['POST'])
+def generate_workflow_test(id):
+    workflow = storage.get_workflow(id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    
+    nodes = workflow.get('nodes', [])
+    safe_name = workflow.get('name', f'workflow_{id}').lower().replace(' ', '_')
+    
+    test_code = [
+        "import pytest",
+        "from .base_suite import WorkflowTestSuite",
+        "",
+        f"class Test{workflow.get('name', f'Workflow{id}').replace(' ', '')}(WorkflowTestSuite):",
+        f"    @pytest.mark.workflow_id({id})",
+        f"    def test_execution(self):",
+        f"        # This test invokes the centralized service layer for consistent execution",
+        f"        execution_id = self.trigger_workflow({id})",
+        f"        status = self.wait_for_completion()",
+        f"        ",
+        f"        assert status == 'completed', f'Workflow execution {{execution_id}} failed'",
+        f"        ",
+    ]
+    
+    for node in nodes:
+        node_id = node.get('id')
+        label = node.get('data', {}).get('label', node_id)
+        test_code.append(f"        # Validate Node: {label}")
+        test_code.append(f"        self.assert_node_success('{node_id}')")
+    
+    file_path = f"tests/workflow_tests/test_{safe_name}.py"
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, 'w') as f:
+        f.write('\n'.join(test_code))
+        
+    # Update workflow's last exported file path in storage if you have such a field
+    # For now, we return it so the frontend can use it
+    return jsonify({"status": "success", "file_path": file_path, "code": '\n'.join(test_code)})
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     log(f"serving on port {port}")

@@ -32,15 +32,48 @@ def register_mcp_routes(app):
                 tools.append(f._mcp_metadata)
         return jsonify(tools)
 
+    @app.route('/api/mcp/system/prompt', methods=['GET'])
+    @mcp_tool(
+        name="get_system_instructions",
+        description="Get specific instructions for the AI on how to interact with this system correctly.",
+        parameters={"type": "object", "properties": {}}
+    )
+    def mcp_get_instructions():
+        return jsonify({
+            "instruction": "DO NOT generate custom Python code for SFTP, S3, SQL, or Airflow. ALWAYS use the provided MCP tools. Use 'list_credentials' to find the required credentialId first."
+        })
+
+    @app.route('/api/mcp/credentials/list', methods=['GET'])
+    @mcp_tool(
+        name="list_credentials",
+        description="List available credentials (names, types, and IDs) to use with other tools. Does not return sensitive data.",
+        parameters={"type": "object", "properties": {}}
+    )
+    def mcp_list_credentials():
+        try:
+            creds = storage.get_credentials()
+            # Return only non-sensitive info
+            safe_creds = []
+            for c in creds:
+                safe_creds.append({
+                    "id": c['id'],
+                    "name": c['name'],
+                    "type": c['type'],
+                    "createdAt": c['createdAt']
+                })
+            return jsonify(safe_creds)
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
     @app.route('/api/mcp/sql/query', methods=['POST'])
     @mcp_tool(
         name="sql_query",
-        description="Execute a SQL query against a registered database credential or the internal database.",
+        description="Execute a SQL query against a registered database credential or the internal database. Use this tool instead of writing custom Python code for SQL tasks.",
         parameters={
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "The SQL query to execute"},
-                "credentialId": {"type": "integer", "description": "Optional ID of the database credential to use"}
+                "credentialId": {"type": "integer", "description": "Optional ID of the database credential from list_credentials to use"}
             },
             "required": ["query"]
         }
@@ -75,12 +108,12 @@ def register_mcp_routes(app):
     @app.route('/api/mcp/airflow/check', methods=['POST'])
     @mcp_tool(
         name="airflow_check",
-        description="Comprehensive Airflow operations (health, list_dags, trigger, logs, etc.)",
+        description="Comprehensive Airflow operations (health, list_dags, trigger, logs, etc.). Use this tool instead of writing custom Python code for Airflow tasks. Requires a valid credentialId from list_credentials.",
         parameters={
             "type": "object",
             "properties": {
                 "operation": {"type": "string", "enum": ["health", "list_dags", "get_dag_details", "trigger_dag", "get_dag_run", "list_dag_runs", "list_task_instances", "get_task_logs", "pause_dag", "unpause_dag", "clear_task_instances", "list_connections", "get_connection", "list_xcoms", "delete_dag", "clear_dag_run"]},
-                "credentialId": {"type": "integer"},
+                "credentialId": {"type": "integer", "description": "The ID of the Airflow credential from list_credentials"},
                 "dagId": {"type": "string"},
                 "dagRunId": {"type": "string"},
                 "taskId": {"type": "string"},
@@ -131,7 +164,7 @@ def register_mcp_routes(app):
     @app.route('/api/mcp/s3/operation', methods=['POST'])
     @mcp_tool(
         name="s3_operation",
-        description="Comprehensive S3 operations (buckets, objects, metadata, presigned, etc.)",
+        description="Comprehensive S3 operations (buckets, objects, metadata, presigned, etc.). Use this tool instead of writing custom Python code for S3 tasks. Requires a valid credentialId from list_credentials.",
         parameters={
             "type": "object",
             "properties": {
@@ -139,7 +172,7 @@ def register_mcp_routes(app):
                 "bucket": {"type": "string"},
                 "key": {"type": "string"},
                 "prefix": {"type": "string"},
-                "credentialId": {"type": "integer"}
+                "credentialId": {"type": "integer", "description": "The ID of the S3 credential from list_credentials"}
             },
             "required": ["operation", "credentialId"]
         }
@@ -168,33 +201,42 @@ def register_mcp_routes(app):
     @app.route('/api/mcp/sftp/operation', methods=['POST'])
     @mcp_tool(
         name="sftp_operation",
-        description="Detailed SFTP operations (list_dir, mkdir, rmdir, stat, rename, remove, chmod, chown)",
+        description="Detailed SFTP operations (list_dir, mkdir, rmdir, stat, rename, remove, chmod, chown). DO NOT GENERATE PYTHON CODE. USE THIS TOOL FOR ALL SFTP TASKS. Requires a valid credentialId from list_credentials.",
         parameters={
             "type": "object",
             "properties": {
                 "operation": {"type": "string", "enum": ["list_dir", "mkdir", "rmdir", "stat", "rename", "remove", "chmod", "chown"]},
-                "credentialId": {"type": "integer"},
-                "path": {"type": "string"},
-                "newPath": {"type": "string"},
-                "mode": {"type": "integer"},
-                "host": {"type": "string"},
-                "port": {"type": "integer", "default": 22}
+                "credentialId": {"type": "integer", "description": "The ID of the SFTP credential from list_credentials"},
+                "path": {"type": "string", "description": "Remote path to operate on"},
+                "newPath": {"type": "string", "description": "New path for rename operation"},
+                "mode": {"type": "integer", "description": "Permissions mode for chmod"},
+                "host": {"type": "string", "description": "SFTP host (if not provided in credential)"},
+                "port": {"type": "integer", "default": 22, "description": "SFTP port (default 22)"}
             },
-            "required": ["operation", "credentialId", "host"]
+            "required": ["operation", "credentialId"]
         }
     )
     def mcp_sftp_op():
         data = request.json
         operation = data.get('operation')
         credential_id = data.get('credentialId')
-        host = data.get('host')
-        port = data.get('port', 22)
         
         try:
             cred = storage.get_credential(int(credential_id))
+            if not cred:
+                return jsonify({"status": "error", "message": f"Credential {credential_id} not found"}), 404
+            
             import paramiko
             c = cred['data']
-            transport = paramiko.Transport((host, port))
+            
+            # Use host/port from credential data if not provided in request
+            host = data.get('host') or c.get('host') or c.get('baseUrl')
+            port = data.get('port') or c.get('port') or 22
+            
+            if not host:
+                return jsonify({"status": "error", "message": "Host not found in request or credential"}), 400
+
+            transport = paramiko.Transport((host, int(port)))
             transport.connect(username=c.get('username'), password=c.get('password'))
             sftp = paramiko.SFTPClient.from_transport(transport)
             
