@@ -1,5 +1,6 @@
 import os
 import time
+import json
 from flask import Flask, send_from_directory, request, jsonify, send_file
 from flask_cors import CORS
 from .models import init_db
@@ -55,36 +56,76 @@ def generate_workflow_test(id):
     nodes = workflow.get('nodes', [])
     safe_name = workflow.get('name', f'workflow_{id}').lower().replace(' ', '_')
     
-    test_code = [
+    # Map node types to service methods for direct service-level testing
+    service_map = {
+        'sql_query': ('SQLService', 'execute_query', ['query']),
+        'airflow_trigger': ('AirflowService', 'trigger_dag', ['dagId', 'conf']),
+        's3_operation': ('S3Service', 'list_objects', ['bucket', 'prefix']),
+        'sftp_operation': ('SFTPService', 'list_dir', ['path']),
+        'airflow_log_check': ('AirflowService', 'get_task_logs', ['dagId', 'dagRunId', 'taskId'])
+    }
+    
+    test_lines = [
         "import pytest",
-        "from .base_suite import WorkflowTestSuite",
+        "from server_py.services.sql_service import SQLService",
+        "from server_py.services.airflow_service import AirflowService",
+        "from server_py.services.s3_service import S3Service",
+        "from server_py.services.sftp_service import SFTPService",
+        "from server_py.storage import storage",
         "",
-        f"class Test{workflow.get('name', f'Workflow{id}').replace(' ', '')}(WorkflowTestSuite):",
-        f"    @pytest.mark.workflow_id({id})",
-        f"    def test_execution(self):",
-        f"        # This test invokes the centralized service layer for consistent execution",
-        f"        execution_id = self.trigger_workflow({id})",
-        f"        status = self.wait_for_completion()",
-        f"        ",
-        f"        assert status == 'completed', f'Workflow execution {{execution_id}} failed'",
-        f"        ",
+        f"class Test{workflow.get('name', f'Workflow{id}').replace(' ', '')}:",
+        "    def test_service_logic(self):",
+        "        # Service-level test: Invokes business logic directly on service classes.",
+        "        # Bypasses workflow engine, nodes, and API routing.",
+        "        context = {}"
     ]
     
+    # Process nodes in order to build sequential service calls
     for node in nodes:
         node_id = node.get('id')
-        label = node.get('data', {}).get('label', node_id)
-        test_code.append(f"        # Validate Node: {label}")
-        test_code.append(f"        self.assert_node_success('{node_id}')")
+        node_type = node.get('data', {}).get('type')
+        config = node.get('data', {}).get('config', {})
+        cred_id = config.get('credentialId')
+        cred_id_str = str(cred_id) if cred_id is not None else "None"
+        
+        if node_type in service_map:
+            svc_class, svc_method, params = service_map[node_type]
+            
+            # Build parameter string with basic variable resolution support (context['node_id'])
+            param_args = []
+            for p in params:
+                val = config.get(p)
+                if isinstance(val, str):
+                    # Basic check for dynamic variable pattern {{node_id.key}}
+                    if val.startswith('{{') and val.endswith('}}'):
+                        var_path = val[2:-2].strip()
+                        if '.' in var_path:
+                            ref_id, key = var_path.split('.', 1)
+                            param_args.append(f"context.get('{ref_id}', {{}}).get('{key}')")
+                        else:
+                            param_args.append(f"context.get('{var_path}')")
+                    else:
+                        param_args.append(f"'{val}'")
+                else:
+                    param_args.append(json.dumps(val))
+            
+            test_lines.extend([
+                f"        # Test Step: {node.get('data', {}).get('label', node_id)}",
+                f"        service_{node_id} = {svc_class}({cred_id_str}, storage)",
+                f"        result_{node_id} = service_{node_id}.{svc_method}({', '.join(param_args)})",
+                f"        assert result_{node_id} is not None",
+                f"        context['{node_id}'] = result_{node_id}",
+                ""
+            ])
+
+    test_code = '\n'.join(test_lines)
     
     file_path = f"tests/workflow_tests/test_{safe_name}.py"
-    # Ensure directory exists
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, 'w') as f:
-        f.write('\n'.join(test_code))
+        f.write(test_code)
         
-    # Update workflow's last exported file path in storage if you have such a field
-    # For now, we return it so the frontend can use it
-    return jsonify({"status": "success", "file_path": file_path, "code": '\n'.join(test_code)})
+    return jsonify({"status": "success", "file_path": file_path, "code": test_code})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

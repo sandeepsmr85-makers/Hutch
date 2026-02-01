@@ -1,37 +1,30 @@
-import sqlalchemy
-from sqlalchemy import text
-from .registry import BaseNode, register_node
-from ..utils import log, resolve_variables
+from ..base import BaseNode
+from .registry import register_node
+from ..services.sql_service import SQLService
+from ..utils import resolve_variables, export_to_excel
 from datetime import datetime
 
 @register_node('sql_query')
 class SQLQueryNode(BaseNode):
     def execute(self):
-        query = resolve_variables(self.config.get('query', ''), self.context)
+        query = resolve_variables(self.config.get('query', ''), self.execution_context)
         credential_id = self.config.get('credentialId')
         self.logs.append({'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': f"Running SQL: {query}"})
         
-        query_results = []
-        try:
-            if credential_id:
-                cred = self.storage.get_credential(int(credential_id))
-                if cred:
-                    cred_type = cred.get('type')
-                    cred_data = cred.get('data', {})
-                    
-                    if cred_type == 'mssql':
-                        conn_str = f"mssql+pymssql://{cred_data.get('username')}:{cred_data.get('password')}@{cred_data.get('host')}:{cred_data.get('port', 1433)}/{cred_data.get('database')}"
-                        engine = sqlalchemy.create_engine(conn_str)
-                        with engine.connect() as conn:
-                            result = conn.execute(text(query))
-                            query_results = [dict(row._mapping) for row in result]
-            else:
-                from ..models import engine as internal_engine
-                with internal_engine.connect() as conn:
-                    result = conn.execute(text(query))
-                    query_results = [dict(row._mapping) for row in result]
-        except Exception as e:
-            raise Exception(f"SQL Error: {str(e)}")
-
+        service = SQLService(credential_id, self.storage)
+        query_results = service.execute_query(query)
+        
+        excel_path = export_to_excel(query_results, self.id, self.execution_id)
+        if excel_path:
+            self.logs.append({'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': f"Query results exported to Excel: {excel_path}"})
+            
         record_count = len(query_results)
-        return {'status': 'success', 'count': record_count, 'results': query_results}
+        result = {
+            'count': record_count,
+            'excel_path': excel_path,
+            'results': query_results,
+            'status': 'success'
+        }
+        
+        self.run_assertions(result)
+        return result

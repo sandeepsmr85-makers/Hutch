@@ -26,10 +26,11 @@ def get_ai():
             else:
                 raise ValueError("Valid tokens not found in fetch_token response")
         except (ImportError, ValueError, Exception) as e:
-            # Fallback to Replit AI Integration
+            # Try Replit AI Integration
             api_key = os.environ.get('AI_INTEGRATIONS_OPENAI_API_KEY')
             base_url = os.environ.get('AI_INTEGRATIONS_OPENAI_BASE_URL')
             
+            # Use Replit AI Integration if configured (even with dummy key)
             if api_key and base_url:
                 openai_client = OpenAI(
                     api_key=api_key,
@@ -37,9 +38,15 @@ def get_ai():
                 )
                 log("Using Replit AI Integration for OpenAI.")
             else:
-                # Last resort: try standard OpenAI env var
-                openai_client = OpenAI()
-                log("Using default OpenAI client configuration.")
+                # Fallback to standard OpenAI API Key secret
+                api_key = os.environ.get('OPENAI_API_KEY')
+                if api_key and not api_key.startswith('Hutch'): # Basic validation
+                    openai_client = OpenAI(api_key=api_key)
+                    log("Using standard OpenAI API key.")
+                else:
+                    # Last resort: try standard OpenAI env var via default constructor
+                    openai_client = OpenAI()
+                    log("Using default OpenAI client configuration.")
     return openai_client
 
 def log(message, source='flask'):

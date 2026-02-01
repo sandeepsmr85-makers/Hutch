@@ -33,7 +33,9 @@ import {
   Trash2,
   Globe,
   Wand2,
-  Clock
+  Clock,
+  Zap,
+  MessageSquare
 } from 'lucide-react';
 
 const TIMEZONES = [
@@ -92,6 +94,8 @@ const NodeIcon = ({ type, className }: { type: string, className?: string }) => 
     case 'api_request': return <Globe className={cn("w-5 h-5", className)} />;
     case 's3_operation': return <Database className={cn("w-5 h-5", className)} />;
     case 'sftp_operation': return <Globe className={cn("w-5 h-5", className)} />;
+    case 'ai_node': return <Zap className={cn("w-5 h-5", className)} />;
+    case 'slack_notification': return <MessageSquare className={cn("w-5 h-5", className)} />;
     default: return <Sparkles className={cn("w-5 h-5", className)} />;
   }
 };
@@ -105,6 +109,8 @@ const CustomNode = ({ id, data, type, selected, execution }: any) => {
   const isPython = type === 'python_script';
   const isCondition = type === 'condition';
   const isAPI = type === 'api_request';
+  const isAI = type === 'ai_node';
+  const isSlack = type === 'slack_notification';
 
   const statusColors = {
     running: "border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]",
@@ -161,6 +167,8 @@ const CustomNode = ({ id, data, type, selected, execution }: any) => {
              isSQL ? 'Database Query' : 
              isCondition ? `Variable: ${data.config?.variable || 'lastRecordCount'}` :
              isAPI ? `${data.config?.method || 'GET'} ${data.config?.url || 'URL unset'}` :
+             isAI ? 'AI Analysis' :
+             isSlack ? 'Slack Notification' :
              'Custom Script'}
           </div>
           {isAirflowLog && data.config?.logAssertion && (
@@ -247,14 +255,20 @@ export default function WorkflowEditor() {
 
   const airflowCredentials = credentials?.filter(c => c.type === 'airflow') || [];
 
+  const [testFilePath, setTestFilePath] = useState<string | null>(null);
+
   const handleExport = async () => {
     try {
-      const res = await fetch(`/api/workflows/${id}/export`);
+      // If we just generated a test, handleExport now behaves like "Export Test"
+      // otherwise it exports the standard Python workflow.
+      const endpoint = testFilePath ? `/api/workflows/${id}/generate-test` : `/api/workflows/${id}/export`;
+      const res = await fetch(endpoint, { method: testFilePath ? 'POST' : 'GET' });
+      
       if (!res.ok) throw new Error("Export request failed");
       const data = await res.json();
       setExportedCode(data.code);
     } catch (e) {
-      toast({ title: "Export Failed", variant: "destructive", description: "Could not generate Python code. Ensure the backend is running." });
+      toast({ title: "Export Failed", variant: "destructive", description: "Could not generate code." });
     }
   };
 
@@ -289,6 +303,7 @@ export default function WorkflowEditor() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [logSearchQuery, setLogSearchQuery] = useState("");
+  const [isVariablesOpen, setIsVariablesOpen] = useState(false);
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId);
 
@@ -301,6 +316,8 @@ export default function WorkflowEditor() {
     api_request: (props: any) => <CustomNode {...props} execution={execution} />,
     s3_operation: (props: any) => <CustomNode {...props} execution={execution} />,
     sftp_operation: (props: any) => <CustomNode {...props} execution={execution} />,
+    ai_node: (props: any) => <CustomNode {...props} execution={execution} />,
+    slack_notification: (props: any) => <CustomNode {...props} execution={execution} />,
   }), [execution]);
 
   const filteredLogs = (execution?.logs as any[])?.filter(log => {
@@ -414,6 +431,19 @@ export default function WorkflowEditor() {
             <Terminal className="w-4 h-4 mr-2" />
             Export Python
           </Button>
+          <Button variant="outline" size="sm" onClick={async () => {
+            try {
+              const res = await apiRequest('POST', `/api/workflows/${id}/generate-test`);
+              const data = await res.json();
+              setTestFilePath(data.file_path);
+              toast({ title: "Test Generated", description: `Saved to ${data.file_path}` });
+            } catch (e) {
+              toast({ title: "Generation Failed", variant: "destructive", description: "Could not generate Pytest file." });
+            }
+          }}>
+            <Zap className="w-4 h-4 mr-2" />
+            Generate Test
+          </Button>
           <Button variant="outline" size="sm" onClick={handleSave}>
             <Save className="w-4 h-4 mr-2" />
             Save
@@ -460,6 +490,66 @@ export default function WorkflowEditor() {
         >
           <Background color="#333" gap={20} size={1} />
           <Controls className="bg-card border-border" />
+          
+          <Panel position="bottom-left" className="mb-4">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="bg-card/80 backdrop-blur border-border"
+              onClick={() => setIsVariablesOpen(true)}
+            >
+              <Terminal className="w-4 h-4 mr-2" />
+              Variable Reference
+            </Button>
+          </Panel>
+
+          <Dialog open={isVariablesOpen} onOpenChange={setIsVariablesOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Variable Reference Guide</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-blue-400" />
+                      Built-in Dates
+                    </h3>
+                    <ul className="text-xs space-y-1 font-mono bg-muted p-2 rounded-md">
+                      <li>{"{{today}} -> 2026-01-31"}</li>
+                      <li>{"{{yesterday}} -> 2026-01-30"}</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Database className="w-4 h-4 text-green-400" />
+                      Node Context
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">Access previous node results using their ID:</p>
+                    <ul className="text-xs space-y-1 font-mono bg-muted p-2 rounded-md">
+                      <li>{"{{node_id.count}}"}</li>
+                      <li>{"{{node_id.status}}"}</li>
+                    </ul>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-sm font-bold flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-purple-400" />
+                    Python Assertions
+                  </h3>
+                  <div className="text-xs bg-muted p-3 rounded-md space-y-2">
+                    <p><code className="text-purple-400">results</code>: List of row dictionaries (SQL nodes)</p>
+                    <p><code className="text-purple-400">count</code>: Number of records or items</p>
+                    <p><code className="text-purple-400">ctx</code>: Full execution history</p>
+                    <div className="border-t border-border pt-2 mt-2 italic text-muted-foreground">
+                      Example: len(results) {" > "} 0 and ctx['node_1']['status'] == 'success'
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <MiniMap 
             className="bg-card border-border" 
             maskColor="rgba(0, 0, 0, 0.2)"
@@ -470,32 +560,45 @@ export default function WorkflowEditor() {
             }}
           />
           
-          <Panel position="top-left" className="bg-card/80 backdrop-blur border border-border p-2 rounded-lg text-xs space-y-2">
-            <div className="font-semibold text-muted-foreground mb-1">Node Types</div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <Cloud className="w-3 h-3 text-blue-400" /> Airflow Trigger
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <SearchIcon className="w-3 h-3 text-blue-400" /> Airflow Log Check
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <Database className="w-3 h-3 text-green-400" /> SQL Query
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <Terminal className="w-3 h-3 text-yellow-400" /> Python Script
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <GitBranch className="w-3 h-3 text-purple-400" /> Condition
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <Globe className="w-3 h-3 text-orange-400" /> API Request
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <Database className="w-3 h-3 text-cyan-400" /> S3 Operation
-            </div>
-            <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
-              <Globe className="w-3 h-3 text-indigo-400" /> SFTP Operation
-            </div>
+          <Panel position="top-left" className="bg-card/80 backdrop-blur border border-border p-0 rounded-lg text-xs overflow-hidden max-w-[180px]">
+            <details className="group" open>
+              <summary className="flex items-center justify-between p-2 font-semibold text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors list-none">
+                <span>Node Types</span>
+                <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="p-2 space-y-2 border-t border-border/50">
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Cloud className="w-3 h-3 text-blue-400" /> Airflow Trigger
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <SearchIcon className="w-3 h-3 text-blue-400" /> Airflow Log Check
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Database className="w-3 h-3 text-green-400" /> SQL Query
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Terminal className="w-3 h-3 text-yellow-400" /> Python Script
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <GitBranch className="w-3 h-3 text-purple-400" /> Condition
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Globe className="w-3 h-3 text-orange-400" /> API Request
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Database className="w-3 h-3 text-cyan-400" /> S3 Operation
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Globe className="w-3 h-3 text-indigo-400" /> SFTP Operation
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <Zap className="w-3 h-3 text-orange-400" /> AI Node
+                </div>
+                <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing hover:bg-muted p-1 rounded">
+                  <MessageSquare className="w-3 h-3 text-pink-400" /> Slack Notification
+                </div>
+              </div>
+            </details>
           </Panel>
         </ReactFlow>
 
@@ -520,7 +623,7 @@ export default function WorkflowEditor() {
         </Dialog>
 
         <Sheet open={!!selectedNodeId} onOpenChange={(open) => !open && setSelectedNodeId(null)}>
-          <SheetContent>
+          <SheetContent className="overflow-y-auto">
             <SheetHeader>
               <SheetTitle>Edit Node: {selectedNode?.data.label}</SheetTitle>
             </SheetHeader>
@@ -577,8 +680,26 @@ export default function WorkflowEditor() {
                     />
                   </div>
                   
-                  <div className="pt-2 border-t space-y-4">
-                    <label className="text-[10px] uppercase font-bold text-muted-foreground">Production Settings</label>
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  Python Assertion
+                  <span className="text-[10px] text-muted-foreground font-normal">(Optional)</span>
+                </label>
+                <textarea 
+                  className="w-full min-h-[80px] p-2 text-xs font-mono bg-muted rounded-md border border-input focus:ring-1 focus:ring-primary outline-none"
+                  placeholder="e.g. len(results) > 0 or data['status'] == 'success'"
+                  value={selectedNode?.data.config?.pythonAssertion || ''}
+                  onChange={(e) => updateNodeData(selectedNode!.id, { 
+                    config: { ...selectedNode.data.config, pythonAssertion: e.target.value } 
+                  })}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Access: <code className="bg-muted px-1 rounded">results</code>, <code className="bg-muted px-1 rounded">count</code>, <code className="bg-muted px-1 rounded">data</code>, <code className="bg-muted px-1 rounded">ctx</code>
+                </p>
+              </div>
+
+              <div className="pt-2 border-t space-y-4">
+                <label className="text-[10px] uppercase font-bold text-muted-foreground">Production Settings</label>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <label className="text-[10px] font-medium">Retries</label>
@@ -616,8 +737,26 @@ export default function WorkflowEditor() {
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t space-y-4">
-                    <label className="text-[10px] uppercase font-bold text-muted-foreground">Production Settings</label>
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  Python Assertion
+                  <span className="text-[10px] text-muted-foreground font-normal">(Optional)</span>
+                </label>
+                <textarea 
+                  className="w-full min-h-[80px] p-2 text-xs font-mono bg-muted rounded-md border border-input focus:ring-1 focus:ring-primary outline-none"
+                  placeholder="e.g. len(results) > 0 or data['status'] == 'success'"
+                  value={selectedNode?.data.config?.pythonAssertion || ''}
+                  onChange={(e) => updateNodeData(selectedNode!.id, { 
+                    config: { ...selectedNode.data.config, pythonAssertion: e.target.value } 
+                  })}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Access: <code className="bg-muted px-1 rounded">results</code>, <code className="bg-muted px-1 rounded">count</code>, <code className="bg-muted px-1 rounded">data</code>, <code className="bg-muted px-1 rounded">ctx</code>
+                </p>
+              </div>
+
+              <div className="pt-2 border-t space-y-4">
+                <label className="text-[10px] uppercase font-bold text-muted-foreground">Production Settings</label>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <label className="text-[10px] font-medium">Retries</label>
